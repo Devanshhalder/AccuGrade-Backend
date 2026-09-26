@@ -1,7 +1,7 @@
 import httpx
 
 
-ML_API_URL = "http://127.0.0.1:8001/evaluate"
+ML_API_URL = "https://accugrade-ml-production.up.railway.app/evaluate"
 
 
 async def evaluate_with_ml(
