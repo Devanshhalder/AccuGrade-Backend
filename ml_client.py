@@ -1,4 +1,6 @@
 import httpx
+import os
+import mimetypes
 
 
 ML_API_URL = "https://accugrade-ml-production.up.railway.app/evaluate"
@@ -10,13 +12,30 @@ async def evaluate_with_ml(
     answer_key: str,
     max_marks: float,
 ):
+    extension = os.path.splitext(image_path)[1].lower()
+
+    mime_types = {
+        ".pdf": "application/pdf",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+
+    mime_type = mime_types.get(
+        extension,
+        mimetypes.guess_type(image_path)[0] or "application/octet-stream"
+    )
+
+    filename = os.path.basename(image_path)
+
     with open(image_path, "rb") as image_file:
 
         files = {
             "image": (
-                "answer.jpg",
+                filename,
                 image_file,
-                "image/jpeg",
+                mime_type,
             )
         }
 
