@@ -18,6 +18,7 @@ import json
 import shutil
 import uuid
 import traceback
+import re
 
 
 from database import (
@@ -602,6 +603,80 @@ def get_answer_sheet(
 # EVALUATOR — LIST ANSWER SHEETS
 # ============================================================
 
+def extract_answer_key_data(answer_key_path: str):
+    """
+    Extract question, answer key, and maximum marks
+    from the uploaded answer-key PDF.
+    """
+
+    question = ""
+    answer_key = ""
+    max_marks = None
+
+    if not answer_key_path or not os.path.isfile(answer_key_path):
+        return {
+            "question": question,
+            "answer_key": answer_key,
+            "max_marks": max_marks,
+        }
+
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(answer_key_path)
+
+        text_parts = []
+
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            text_parts.append(page_text)
+
+        text = "\n".join(text_parts).strip()
+
+        # -----------------------------------------------
+        # Extract Question
+        # -----------------------------------------------
+
+        question_match = re.search(
+            r"Question\s*(.*?)\s*Answer Key",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        if question_match:
+            question = question_match.group(1).strip()
+
+        # -----------------------------------------------
+        # Extract Answer Key + Maximum Marks
+        # -----------------------------------------------
+
+        answer_match = re.search(
+            r"Answer Key\s*(.*?)\s*Maximum Marks\s*:\s*([0-9]+(?:\.[0-9]+)?)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        if answer_match:
+            answer_key = answer_match.group(1).strip()
+
+            max_marks = float(
+                answer_match.group(2)
+            )
+
+    except Exception as error:
+
+        print(
+            "Answer key extraction failed:",
+            error
+        )
+
+    return {
+        "question": question,
+        "answer_key": answer_key,
+        "max_marks": max_marks,
+    }
+
+
 @app.get("/evaluator/answer-sheets")
 def get_evaluator_answer_sheets(
     db: Session = Depends(get_db),
@@ -621,21 +696,71 @@ def get_evaluator_answer_sheets(
         .all()
     )
 
-    return [
-        {
-            "sheet_id": sheet.id,
-            "batch_id": batch.id,
-            "batch_name": batch.batch_name,
-            "subject": batch.subject,
-            "examination": batch.examination,
-            "max_marks": batch.max_marks,
-            "filename": sheet.original_filename,
-            "status": sheet.status,
-            "file_url": f"/answer-sheets/{sheet.id}",
-        }
-        for sheet, batch in sheets
-    ]
+    results = []
 
+    for sheet, batch in sheets:
+
+        # ----------------------------------------------------
+        # Find the uploaded answer-key PDF
+        # ----------------------------------------------------
+
+        batch_directory = os.path.join(
+            UPLOAD_DIR,
+            f"batch_{batch.id}"
+        )
+
+        answer_key_path = None
+
+        if os.path.isdir(batch_directory):
+
+            for filename in os.listdir(batch_directory):
+
+                if filename.startswith("answer_key_"):
+
+                    answer_key_path = os.path.join(
+                        batch_directory,
+                        filename
+                    )
+
+                    break
+
+        # ----------------------------------------------------
+        # Extract actual question + answer key + marks
+        # ----------------------------------------------------
+
+        answer_key_data = extract_answer_key_data(
+            answer_key_path
+        )
+
+        actual_max_marks = (
+            answer_key_data["max_marks"]
+            if answer_key_data["max_marks"] is not None
+            else batch.max_marks
+        )
+
+        # ----------------------------------------------------
+        # Build evaluator response
+        # ----------------------------------------------------
+
+        results.append(
+            {
+                "sheet_id": sheet.id,
+                "batch_id": batch.id,
+                "batch_name": batch.batch_name,
+                "subject": batch.subject,
+                "examination": batch.examination,
+                "max_marks": actual_max_marks,
+                "filename": sheet.original_filename,
+                "status": sheet.status,
+                "file_url": f"/answer-sheets/{sheet.id}",
+
+                # Actual uploaded answer-key data
+                "question": answer_key_data["question"],
+                "answer_key": answer_key_data["answer_key"],
+            }
+        )
+
+    return results
 
 # ============================================================
 # ROOT
